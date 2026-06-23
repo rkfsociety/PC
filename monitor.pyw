@@ -241,12 +241,23 @@ class MonitorApp:
             win32gui.InvalidateRect(self._hwnd, None, True)
             win32gui.UpdateWindow(self._hwnd)
 
+    def _ensure_topmost(self):
+        hwnd = self._hwnd
+        if not hwnd:
+            return
+        win32gui.SetWindowPos(
+            hwnd,
+            win32con.HWND_TOPMOST,
+            0, 0, 0, 0,
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
+        )
+
     def _apply_window_style(self):
         hwnd = self._hwnd
         if not hwnd:
             return
         style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        style |= win32con.WS_EX_LAYERED
+        style |= win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST
         if self._move_mode:
             style &= ~win32con.WS_EX_TRANSPARENT
         else:
@@ -254,6 +265,7 @@ class MonitorApp:
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, int(ALPHA * 255), win32con.LWA_ALPHA)
+        self._ensure_topmost()
 
     def _apply_move_mode(self):
         if self._move_mode:
@@ -281,6 +293,7 @@ class MonitorApp:
         x = self.root.winfo_x() + event.x - self._drag_x
         y = self.root.winfo_y() + event.y - self._drag_y
         self.root.geometry(f"+{x}+{y}")
+        self._ensure_topmost()
 
     def _drag_stop(self, _event):
         self._save_position()
@@ -471,6 +484,7 @@ class MonitorApp:
                 used, total, pct = disk[drv]
                 row.update(f"{used:.0f}/{total:.0f}ГБ", pct)
 
+        self._ensure_topmost()
         self.root.after(UPDATE_MS, self._update)
 
     def stop(self):
