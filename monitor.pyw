@@ -138,16 +138,16 @@ def bar_color(pct):
     if pct < 85:   return ACCENT_WARN
     return ACCENT_HOT
 
-def get_secondary_monitor():
+def get_primary_monitor():
     for hMon, _, _ in win32api.EnumDisplayMonitors():
         info = win32api.GetMonitorInfo(hMon)
-        if not info["Flags"]:  # Flags==1 → главный
+        if info["Flags"] & win32con.MONITORINFOF_PRIMARY:
             mx, my, mr, mb = info["Monitor"]
-            return (mx, my, mr - mx, mb - my)
+            return mx, my, mr - mx, mb - my
     hMon = win32api.EnumDisplayMonitors()[0][0]
     info = win32api.GetMonitorInfo(hMon)
     mx, my, mr, mb = info["Monitor"]
-    return (mx, my, mr - mx, mb - my)
+    return mx, my, mr - mx, mb - my
 
 def make_tray_icon():
     img = Image.new("RGB", (64, 64), "#1a1a1a")
@@ -462,9 +462,9 @@ class MonitorApp:
         if pos:
             wx, wy = pos
         else:
-            mx, my, mw, mh = get_secondary_monitor()
-            wx = mx + mw - WIDTH - MARGIN
-            wy = my + mh - total_h - MARGIN
+            mx, my, mw, mh = get_primary_monitor()
+            wx = mx + (mw - WIDTH) // 2
+            wy = my + (mh - total_h) // 2
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
         self._apply_clickthrough()
 
