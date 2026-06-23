@@ -52,8 +52,8 @@ ORANGE     = "#ff8c00"
 ORANGE_DIM = "#6b3a00"
 RED        = "#ff4400"
 WHITE      = "#e8f4ff"
-GLASS_MAIN  = (10, 20, 32, 130)
-GLASS_PANEL = (12, 24, 38, 95)
+GLASS_OUTLINE = 200
+GLASS_GLOW    = 80
 COLORKEY_REF = 0x00010001
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
@@ -200,13 +200,11 @@ def _create_glass_layer(w, h, net_y, net_h):
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
-    draw.polygon(shell, fill=GLASS_MAIN)
-    draw.polygon(shell, outline=_hex_rgba(CYAN, 190))
+    draw.polygon(shell, outline=_hex_rgba(CYAN, GLASS_OUTLINE))
     glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
-    draw.polygon(glow, outline=_hex_rgba(CYAN, 70))
+    draw.polygon(glow, outline=_hex_rgba(CYAN, GLASS_GLOW))
     net = _chamfer_poly(PAD, net_y, w - PAD, net_y + net_h, 6)
-    draw.polygon(net, fill=GLASS_PANEL)
-    draw.polygon(net, outline=_hex_rgba(CYAN, 140))
+    draw.polygon(net, outline=_hex_rgba(CYAN, GLASS_OUTLINE - 30))
     return img
 
 def _place_glass_bg(c, w, h, net_y, net_h):
@@ -251,31 +249,6 @@ def get_primary_monitor():
     info = win32api.GetMonitorInfo(hMon)
     mx, my, mr, mb = info["Monitor"]
     return mx, my, mr - mx, mb - my
-
-def _monitor_visible_width(wx, wy, w, h, mx, my, mr, mb):
-    ix1 = max(mx, wx)
-    ix2 = min(mr, wx + w)
-    return max(0, ix2 - ix1)
-
-def clamp_window_pos(wx, wy, w, h):
-    pmx, pmy, pmw, pmh = get_primary_monitor()
-    on_primary = _monitor_visible_width(wx, wy, w, h, pmx, pmy, pmx + pmw, pmy + pmh)
-    if on_primary < w * 0.5:
-        return pmx + (pmw - w) // 2, pmy + (pmh - h) // 2
-
-    best = (wx, wy)
-    best_vis = 0
-    for hMon, _, _ in win32api.EnumDisplayMonitors():
-        info = win32api.GetMonitorInfo(hMon)
-        mx, my, mr, mb = info["Monitor"]
-        vis = _monitor_visible_width(wx, wy, w, h, mx, my, mr, mb)
-        if vis > best_vis:
-            best_vis = vis
-            best = (
-                max(mx, min(wx, mr - w)),
-                max(my, min(wy, mb - h)),
-            )
-    return best
 
 def make_tray_icon():
     img = Image.new("RGB", (64, 64), BG)
@@ -641,10 +614,10 @@ class MonitorApp:
             mx, my, mw, mh = get_primary_monitor()
             wx = mx + (mw - WIDTH) // 2
             wy = my + (mh - total_h) // 2
-        wx, wy = clamp_window_pos(wx, wy, WIDTH, total_h)
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
         self._layout_ready = True
-        self._save_position()
+        if not pos:
+            self._save_position()
         self._apply_clickthrough()
 
         # Запускаем цикл обновления
