@@ -111,19 +111,27 @@ def set_autostart(enabled):
             except FileNotFoundError:
                 pass
 
+def _signed_dword(value):
+    value = int(value)
+    if value > 0x7FFFFFFF:
+        value -= 0x100000000
+    return value
+
 def load_window_pos():
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, POS_KEY, 0, winreg.KEY_READ) as key:
-            x = winreg.QueryValueEx(key, "x")[0]
-            y = winreg.QueryValueEx(key, "y")[0]
-            return int(x), int(y)
+            x_raw = winreg.QueryValueEx(key, "x")[0]
+            y_raw = winreg.QueryValueEx(key, "y")[0]
+            if isinstance(x_raw, str):
+                return int(x_raw), int(y_raw)
+            return _signed_dword(x_raw), _signed_dword(y_raw)
     except OSError:
         return None
 
 def save_window_pos(x, y):
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, POS_KEY) as key:
-        winreg.SetValueEx(key, "x", 0, winreg.REG_DWORD, int(x))
-        winreg.SetValueEx(key, "y", 0, winreg.REG_DWORD, int(y))
+        winreg.SetValueEx(key, "x", 0, winreg.REG_SZ, str(int(x)))
+        winreg.SetValueEx(key, "y", 0, winreg.REG_SZ, str(int(y)))
 
 def bar_color(pct):
     if pct < 60:   return ACCENT_OK
@@ -314,8 +322,19 @@ class MonitorApp:
     def _drag_stop(self, _event):
         self._save_position()
 
+    def _window_pos(self):
+        self.root.update_idletasks()
+        hwnd = self._hwnd
+        if hwnd:
+            try:
+                left, top, _, _ = win32gui.GetWindowRect(hwnd)
+                return left, top
+            except Exception:
+                pass
+        return self.root.winfo_rootx(), self.root.winfo_rooty()
+
     def _save_position(self):
-        save_window_pos(self.root.winfo_x(), self.root.winfo_y())
+        save_window_pos(*self._window_pos())
 
     def _apply_clickthrough(self):
         self._apply_window_style()
@@ -504,6 +523,10 @@ class MonitorApp:
         self.root.after(UPDATE_MS, self._update)
 
     def stop(self):
+        try:
+            self._save_position()
+        except Exception:
+            pass
         self._running = False
         self.root.quit()
 
@@ -519,6 +542,10 @@ def run_tray(app):
         app.set_move_mode(want)
 
     def on_restart(icon, item):
+        try:
+            app._save_position()
+        except Exception:
+            pass
         spawn_restart()
         icon.stop()
         app.stop()
