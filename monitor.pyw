@@ -65,9 +65,15 @@ def acquire_single_instance():
         return False
     return True
 
-def _autostart_command():
+def release_single_instance():
+    global _instance_mutex
+    if _instance_mutex:
+        ctypes.windll.kernel32.CloseHandle(_instance_mutex)
+        _instance_mutex = None
+
+def _launch_target():
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
+        return sys.executable, []
     base = os.path.dirname(os.path.abspath(__file__))
     script = os.path.join(base, "monitor.pyw")
     if not os.path.isfile(script):
@@ -75,7 +81,17 @@ def _autostart_command():
     pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     if not os.path.isfile(pythonw):
         pythonw = sys.executable
-    return f'"{pythonw}" "{script}"'
+    return pythonw, [script]
+
+def _autostart_command():
+    exe, args = _launch_target()
+    parts = [f'"{exe}"'] + [f'"{a}"' for a in args]
+    return " ".join(parts)
+
+def spawn_restart():
+    release_single_instance()
+    exe, args = _launch_target()
+    subprocess.Popen([exe, *args])
 
 def is_autostart_enabled():
     try:
@@ -502,6 +518,11 @@ def run_tray(app):
         want = not app.is_move_mode()
         app.set_move_mode(want)
 
+    def on_restart(icon, item):
+        spawn_restart()
+        icon.stop()
+        app.stop()
+
     def on_quit(icon, item):
         icon.stop()
         app.stop()
@@ -522,6 +543,7 @@ def run_tray(app):
                 checked=lambda item: app.is_move_mode(),
             ),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Перезапуск", on_restart),
             pystray.MenuItem("Выход", on_quit),
         ),
     )
