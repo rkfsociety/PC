@@ -25,7 +25,7 @@ import winreg
 import win32api
 import win32con
 import win32gui
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 import pystray
 
 try:
@@ -37,13 +37,24 @@ except Exception:
 # ========= Конфиг / HUD-тема =========
 UPDATE_MS  = 1000
 WIDTH      = 520
-ALPHA      = 0.90
 PAD        = 12
 CHAMFER    = 10
 COL_GAP    = 10
+TRANSPARENT = "#010001"
 BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
+CYAN       = "#00e5ff"
+CYAN_DIM   = "#005f6b"
+GREEN      = "#39ff14"
+GREEN_DIM  = "#145208"
+ORANGE     = "#ff8c00"
+ORANGE_DIM = "#6b3a00"
+RED        = "#ff4400"
+WHITE      = "#e8f4ff"
+GLASS_MAIN  = (10, 20, 32, 130)
+GLASS_PANEL = (12, 24, 38, 95)
+COLORKEY_REF = 0x00010001
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
 GREEN      = "#39ff14"
@@ -176,7 +187,35 @@ def _chamfer_points(x1, y1, x2, y2, cut):
         x1, y1 + cut,
     ]
 
-def _draw_chamfer(c, x1, y1, x2, y2, cut=CHAMFER, fill=BG, outline=CYAN, width=1, glow=False):
+def _chamfer_poly(x1, y1, x2, y2, cut):
+    pts = _chamfer_points(x1, y1, x2, y2, cut)
+    return [(pts[i], pts[i + 1]) for i in range(0, len(pts), 2)]
+
+def _hex_rgba(h, alpha=255):
+    h = h.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return (r, g, b, alpha)
+
+def _create_glass_layer(w, h, net_y, net_h):
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
+    draw.polygon(shell, fill=GLASS_MAIN)
+    draw.polygon(shell, outline=_hex_rgba(CYAN, 190))
+    glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
+    draw.polygon(glow, outline=_hex_rgba(CYAN, 70))
+    net = _chamfer_poly(PAD, net_y, w - PAD, net_y + net_h, 6)
+    draw.polygon(net, fill=GLASS_PANEL)
+    draw.polygon(net, outline=_hex_rgba(CYAN, 140))
+    return img
+
+def _place_glass_bg(c, w, h, net_y, net_h):
+    photo = ImageTk.PhotoImage(_create_glass_layer(w, h, net_y, net_h))
+    bg_id = c.create_image(0, 0, anchor="nw", image=photo)
+    c.tag_lower(bg_id)
+    return photo, bg_id
+
+def _draw_chamfer(c, x1, y1, x2, y2, cut=CHAMFER, fill="", outline=CYAN, width=1, glow=False):
     ids = []
     if glow and outline:
         pts = _chamfer_points(x1, y1, x2, y2, cut)
@@ -190,10 +229,6 @@ def _glow_text(c, x, y, text, font, color, anchor="nw"):
     for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1)):
         c.create_text(x + dx, y + dy, text=text, font=font, fill=dim, anchor=anchor)
     return c.create_text(x, y, text=text, font=font, fill=color, anchor=anchor)
-
-def _draw_shell(c, w, h):
-    for i in _draw_chamfer(c, 1, 1, w - 1, h - 1, CHAMFER, fill=BG, outline=CYAN, width=1, glow=True):
-        c.tag_lower(i)
 
 def get_cpu_temp():
     try:
@@ -318,7 +353,7 @@ class DriveRow:
         self.w = w
         self.pct = 0
         self.frame = _draw_chamfer(c, x, y, x + w, y + DRIVE_H, 4,
-                                   fill=BG_PANEL, outline=CYAN, width=1)
+                                   fill="", outline=CYAN, width=1)
         self.lbl_id = c.create_text(x + 6, y + 4, text=f"{name} DRIVE",
                                     font=FONT_SMALL, fill=CYAN, anchor="nw")
         self.val_id = c.create_text(x + w - 6, y + 4, text="", font=FONT_VALUE,
@@ -351,14 +386,17 @@ class MonitorApp:
         self.root.title("PC Monitor")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.configure(bg=BG)
+        self.root.configure(bg=TRANSPARENT)
+        self.root.attributes("-transparentcolor", TRANSPARENT)
         # Прячем пока не разместим
         self.root.geometry("1x1+-9999+-9999")
         self.root.update_idletasks()
 
-        self.canvas = tk.Canvas(self.root, bg=BG, highlightthickness=0,
+        self.canvas = tk.Canvas(self.root, bg=TRANSPARENT, highlightthickness=0,
                                 width=WIDTH, height=400)
         self.canvas.pack()
+
+        self._glass_photo = None
 
         # hwnd — получаем сразу, пока заголовок ещё есть
         self._hwnd = win32gui.FindWindow(None, "PC Monitor")
@@ -443,7 +481,7 @@ class MonitorApp:
             style |= win32con.WS_EX_TRANSPARENT
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
         ctypes.windll.user32.SetLayeredWindowAttributes(
-            hwnd, 0, int(ALPHA * 255), win32con.LWA_ALPHA)
+            hwnd, COLORKEY_REF, 0, win32con.LWA_COLORKEY)
         self._ensure_topmost()
 
     def _apply_move_mode(self):
@@ -584,8 +622,6 @@ class MonitorApp:
 
         net_y = max(ly + 56, ry) + 8
         net_h = 34
-        _draw_chamfer(c, PAD, net_y, WIDTH - PAD, net_y + net_h, 6,
-                      fill=BG_PANEL, outline=CYAN, width=1, glow=True)
         _glow_text(c, PAD + 10, net_y + 8, "NETWORK:", FONT_NET, CYAN, "nw")
         self._txt_net_up = c.create_text(
             PAD + 100, net_y + 8, text="↑ UP 0.00 MB/s",
@@ -596,7 +632,7 @@ class MonitorApp:
 
         total_h = net_y + net_h + PAD
         self.canvas.config(height=total_h)
-        _draw_shell(c, WIDTH, total_h)
+        self._glass_photo, _ = _place_glass_bg(c, WIDTH, total_h, net_y, net_h)
 
         pos = load_window_pos()
         if pos:
