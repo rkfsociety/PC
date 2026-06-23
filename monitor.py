@@ -185,6 +185,11 @@ class MonitorApp:
 
         # hwnd — получаем сразу, пока заголовок ещё есть
         self._hwnd = win32gui.FindWindow(None, "PC Monitor")
+        self._move_mode = False
+        self._drag_x    = 0
+        self._drag_y    = 0
+        self._move_border = None
+        self._move_hint   = None
         self._apply_clickthrough()
 
         # Метрики
@@ -198,11 +203,6 @@ class MonitorApp:
         self._net_prev  = psutil.net_io_counters()
         self._net_time  = time.time()
         self._running   = True
-        self._move_mode = False
-        self._drag_x    = 0
-        self._drag_y    = 0
-        self._move_border = None
-        self._move_hint   = None
 
         threading.Thread(target=self._metrics_loop, daemon=True).start()
 
