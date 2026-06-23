@@ -127,18 +127,27 @@ def _signed_dword(value):
         value -= 0x100000000
     return value
 
+def _valid_window_pos(x, y):
+    return -500 <= int(x) <= 20000 and -500 <= int(y) <= 20000
+
 def load_window_pos():
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, POS_KEY, 0, winreg.KEY_READ) as key:
             x_raw = winreg.QueryValueEx(key, "x")[0]
             y_raw = winreg.QueryValueEx(key, "y")[0]
             if isinstance(x_raw, str):
-                return int(x_raw), int(y_raw)
-            return _signed_dword(x_raw), _signed_dword(y_raw)
+                x, y = int(x_raw), int(y_raw)
+            else:
+                x, y = _signed_dword(x_raw), _signed_dword(y_raw)
+            if not _valid_window_pos(x, y):
+                return None
+            return x, y
     except OSError:
         return None
 
 def save_window_pos(x, y):
+    if not _valid_window_pos(x, y):
+        return
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, POS_KEY) as key:
         winreg.SetValueEx(key, "x", 0, winreg.REG_SZ, str(int(x)))
         winreg.SetValueEx(key, "y", 0, winreg.REG_SZ, str(int(y)))
@@ -251,6 +260,7 @@ class MonitorApp:
         self._drag_y    = 0
         self._move_border = None
         self._move_hint   = None
+        self._layout_ready = False
         self._apply_clickthrough()
 
         # Метрики
@@ -371,6 +381,8 @@ class MonitorApp:
         return self.root.winfo_rootx(), self.root.winfo_rooty()
 
     def _save_position(self):
+        if not self._layout_ready:
+            return
         save_window_pos(*self._window_pos())
 
     def _apply_clickthrough(self):
@@ -505,6 +517,8 @@ class MonitorApp:
             wx = mx + (mw - WIDTH) // 2
             wy = my + (mh - total_h) // 2
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
+        self._layout_ready = True
+        self._save_position()
         self._apply_clickthrough()
 
         # Запускаем цикл обновления
