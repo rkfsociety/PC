@@ -36,7 +36,7 @@ except Exception:
 
 # ========= Конфиг / HUD-тема =========
 UPDATE_MS  = 1000
-WIDTH      = 520
+WIDTH      = 460
 PAD        = 12
 CHAMFER    = 10
 COL_GAP    = 10
@@ -586,13 +586,14 @@ class MonitorApp:
 
         net_y = max(ly + 56, ry) + 8
         net_h = 34
-        _glow_text(c, PAD + 10, net_y + 8, "NETWORK:", FONT_NET, CYAN, "nw")
+        net_lbl_x = PAD + 10
+        _glow_text(c, net_lbl_x, net_y + 8, "NETWORK:", FONT_NET, CYAN, "nw")
         self._txt_net_up = c.create_text(
-            PAD + 100, net_y + 8, text="↑ UP 0.00 MB/s",
+            net_lbl_x + 78, net_y + 8, text="↑ UP 0.00 MB/s",
             anchor="nw", font=FONT_NET, fill=GREEN)
         self._txt_net_down = c.create_text(
-            PAD + 250, net_y + 8, text="↓ DOWN 0.00 MB/s",
-            anchor="nw", font=FONT_NET, fill=GREEN)
+            WIDTH - PAD - 10, net_y + 8, text="↓ DOWN 0.00 MB/s",
+            anchor="ne", font=FONT_NET, fill=GREEN)
 
         total_h = net_y + net_h + PAD
         self.canvas.config(height=total_h)
