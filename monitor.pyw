@@ -217,17 +217,30 @@ def get_primary_monitor():
     mx, my, mr, mb = info["Monitor"]
     return mx, my, mr - mx, mb - my
 
+def _monitor_visible_width(wx, wy, w, h, mx, my, mr, mb):
+    ix1 = max(mx, wx)
+    ix2 = min(mr, wx + w)
+    return max(0, ix2 - ix1)
+
 def clamp_window_pos(wx, wy, w, h):
+    pmx, pmy, pmw, pmh = get_primary_monitor()
+    on_primary = _monitor_visible_width(wx, wy, w, h, pmx, pmy, pmx + pmw, pmy + pmh)
+    if on_primary < w * 0.5:
+        return pmx + (pmw - w) // 2, pmy + (pmh - h) // 2
+
+    best = (wx, wy)
+    best_vis = 0
     for hMon, _, _ in win32api.EnumDisplayMonitors():
         info = win32api.GetMonitorInfo(hMon)
         mx, my, mr, mb = info["Monitor"]
-        if wx + w > mx and wx < mr and wy + h > my and wy < mb:
-            return (
+        vis = _monitor_visible_width(wx, wy, w, h, mx, my, mr, mb)
+        if vis > best_vis:
+            best_vis = vis
+            best = (
                 max(mx, min(wx, mr - w)),
                 max(my, min(wy, mb - h)),
             )
-    mx, my, mw, mh = get_primary_monitor()
-    return mx + (mw - w) // 2, my + (mh - h) // 2
+    return best
 
 def make_tray_icon():
     img = Image.new("RGB", (64, 64), BG)
