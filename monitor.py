@@ -52,6 +52,8 @@ ORANGE     = "#ff8c00"
 ORANGE_DIM = "#6b3a00"
 RED        = "#ff4400"
 WHITE      = "#e8f4ff"
+GLASS_MAIN   = (10, 20, 32, 128)
+GLASS_PANEL  = (12, 24, 38, 110)
 GLASS_OUTLINE = 200
 GLASS_GLOW    = 80
 COLORKEY_REF = 0x00010001
@@ -160,12 +162,22 @@ def load_window_pos():
     except OSError:
         return None
 
+def has_saved_position():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, POS_KEY, 0, winreg.KEY_READ) as key:
+            winreg.QueryValueEx(key, "x")
+            winreg.QueryValueEx(key, "y")
+            return True
+    except OSError:
+        return False
+
 def save_window_pos(x, y):
     if not _valid_window_pos(x, y):
         return
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, POS_KEY) as key:
         winreg.SetValueEx(key, "x", 0, winreg.REG_SZ, str(int(x)))
         winreg.SetValueEx(key, "y", 0, winreg.REG_SZ, str(int(y)))
+        winreg.SetValueEx(key, "placed", 0, winreg.REG_SZ, "1")
 
 def metric_color(pct):
     if pct < 60:
@@ -200,10 +212,12 @@ def _create_glass_layer(w, h, net_y, net_h):
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
+    draw.polygon(shell, fill=GLASS_MAIN)
     draw.polygon(shell, outline=_hex_rgba(CYAN, GLASS_OUTLINE))
     glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
     draw.polygon(glow, outline=_hex_rgba(CYAN, GLASS_GLOW))
     net = _chamfer_poly(PAD, net_y, w - PAD, net_y + net_h, 6)
+    draw.polygon(net, fill=GLASS_PANEL)
     draw.polygon(net, outline=_hex_rgba(CYAN, GLASS_OUTLINE - 30))
     return img
 
@@ -608,15 +622,16 @@ class MonitorApp:
         self._glass_photo, _ = _place_glass_bg(c, WIDTH, total_h, net_y, net_h)
 
         pos = load_window_pos()
-        if pos:
+        if has_saved_position() and pos:
             wx, wy = pos
         else:
             mx, my, mw, mh = get_primary_monitor()
             wx = mx + (mw - WIDTH) // 2
             wy = my + (mh - total_h) // 2
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
+        self.root.update_idletasks()
         self._layout_ready = True
-        if not pos:
+        if not has_saved_position():
             self._save_position()
         self._apply_clickthrough()
 
