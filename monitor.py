@@ -44,9 +44,9 @@ TRANSPARENT = "#010001"
 BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
-GLASS_COLOR = "#0a1828"
-GLASS_STIPPLE = "gray12"
-BAR_STIPPLE   = "gray25"
+GLASS_COLOR = "#0e2438"
+GLASS_STIPPLE = "gray37"
+BAR_STIPPLE   = "gray50"
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
 GREEN      = "#39ff14"
@@ -194,7 +194,7 @@ def _draw_glass_bg(c, w, h, net_y, net_h):
     ids = []
     shell = _chamfer_points(1, 1, w - 1, h - 1, CHAMFER)
     ids.append(c.create_polygon(
-        shell, fill=GLASS_COLOR, outline=CYAN, width=1, stipple=GLASS_STIPPLE))
+        shell, fill=GLASS_COLOR, outline=CYAN, width=2, stipple=GLASS_STIPPLE))
     ids.append(c.create_polygon(
         _chamfer_points(0, 0, w, h, CHAMFER + 1),
         fill="", outline=CYAN_DIM, width=1))
