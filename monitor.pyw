@@ -52,6 +52,17 @@ FONT_SEC   = ("Consolas", 8, "bold")
 
 AUTOSTART_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "PCMonitor"
+MUTEX_NAME     = "Global\\PCMonitor_SingleInstance"
+_instance_mutex  = None
+
+def acquire_single_instance():
+    global _instance_mutex
+    _instance_mutex = ctypes.windll.kernel32.CreateMutexW(None, True, MUTEX_NAME)
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.kernel32.CloseHandle(_instance_mutex)
+        _instance_mutex = None
+        return False
+    return True
 
 def _autostart_command():
     if getattr(sys, "frozen", False):
@@ -397,6 +408,8 @@ def run_tray(app):
     icon.run()
 
 if __name__ == "__main__":
+    if not acquire_single_instance():
+        sys.exit(0)
     app = MonitorApp()
     threading.Thread(target=run_tray, args=(app,), daemon=True).start()
     app.run()
