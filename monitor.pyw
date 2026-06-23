@@ -44,9 +44,9 @@ TRANSPARENT = "#010001"
 BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
-GLASS_ALPHA_MAIN = 64
-GLASS_ALPHA_NET  = 50
-BAR_STIPPLE      = "gray50"
+GLASS_BG_ALPHA = 230
+PANEL_FILL     = (14, 36, 56, 255)
+BAR_STIPPLE    = "gray50"
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
 GREEN      = "#39ff14"
@@ -189,29 +189,21 @@ def _create_glass_image(w, h, net_y, net_h):
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
-    draw.polygon(shell, fill=(14, 36, 56, GLASS_ALPHA_MAIN))
-    draw.polygon(shell, outline=(0, 229, 255, 200))
+    draw.polygon(shell, fill=(*PANEL_FILL[:3], GLASS_BG_ALPHA))
+    draw.polygon(shell, outline=(0, 229, 255, 255))
     glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
-    draw.polygon(glow, outline=(0, 122, 139, 90))
+    draw.polygon(glow, outline=(0, 122, 139, 120))
     net = _chamfer_poly(PAD, net_y, w - PAD, net_y + net_h, 6)
-    draw.polygon(net, fill=(14, 36, 56, GLASS_ALPHA_NET))
-    draw.polygon(net, outline=(0, 229, 255, 160))
+    draw.polygon(net, fill=PANEL_FILL)
+    draw.polygon(net, outline=(0, 229, 255, 255))
     return img
 
 def _draw_glass_stipple(c, w, h, net_y, net_h):
     ids = []
     shell = _chamfer_points(1, 1, w - 1, h - 1, CHAMFER)
-    try:
-        ids.append(c.create_polygon(
-            shell, fill=BG, outline=CYAN, width=2, stipple="gray50"))
-    except tk.TclError:
-        ids.append(c.create_polygon(shell, fill=BG, outline=CYAN, width=2))
+    ids.append(c.create_polygon(shell, fill=BG, outline=CYAN, width=2))
     net = _chamfer_points(PAD, net_y, w - PAD, net_y + net_h, 6)
-    try:
-        ids.append(c.create_polygon(
-            net, fill=BG, outline=CYAN, width=1, stipple="gray50"))
-    except tk.TclError:
-        ids.append(c.create_polygon(net, fill=BG, outline=CYAN, width=1))
+    ids.append(c.create_polygon(net, fill=BG, outline=CYAN, width=1))
     for i in ids:
         c.tag_lower(i)
 
