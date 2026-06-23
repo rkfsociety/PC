@@ -25,7 +25,7 @@ import winreg
 import win32api
 import win32con
 import win32gui
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 import pystray
 
 try:
@@ -44,9 +44,9 @@ TRANSPARENT = "#010001"
 BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
-GLASS_COLOR = "#0e2438"
-GLASS_STIPPLE = "gray25"
-BAR_STIPPLE   = "gray50"
+GLASS_ALPHA_MAIN = 115
+GLASS_ALPHA_NET  = 90
+BAR_STIPPLE      = "gray50"
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
 GREEN      = "#39ff14"
@@ -153,15 +153,6 @@ def load_window_pos():
     except OSError:
         return None
 
-def has_saved_position():
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, POS_KEY, 0, winreg.KEY_READ) as key:
-            winreg.QueryValueEx(key, "x")
-            winreg.QueryValueEx(key, "y")
-            return True
-    except OSError:
-        return False
-
 def save_window_pos(x, y):
     if not _valid_window_pos(x, y):
         return
@@ -190,27 +181,49 @@ def _chamfer_points(x1, y1, x2, y2, cut):
         x1, y1 + cut,
     ]
 
-def _glass_polygon(c, points, outline=CYAN, width=1):
-    try:
-        return c.create_polygon(
-            points, fill=GLASS_COLOR, outline=outline, width=width,
-            stipple=GLASS_STIPPLE)
-    except tk.TclError:
-        return c.create_polygon(
-            points, fill=BG, outline=outline, width=width)
+def _chamfer_poly(x1, y1, x2, y2, cut):
+    pts = _chamfer_points(x1, y1, x2, y2, cut)
+    return [(pts[i], pts[i + 1]) for i in range(0, len(pts), 2)]
 
-def _draw_glass_bg(c, w, h, net_y, net_h):
+def _create_glass_image(w, h, net_y, net_h):
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
+    draw.polygon(shell, fill=(14, 36, 56, GLASS_ALPHA_MAIN))
+    draw.polygon(shell, outline=(0, 229, 255, 200))
+    glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
+    draw.polygon(glow, outline=(0, 122, 139, 90))
+    net = _chamfer_poly(PAD, net_y, w - PAD, net_y + net_h, 6)
+    draw.polygon(net, fill=(14, 36, 56, GLASS_ALPHA_NET))
+    draw.polygon(net, outline=(0, 229, 255, 160))
+    return img
+
+def _draw_glass_stipple(c, w, h, net_y, net_h):
     ids = []
     shell = _chamfer_points(1, 1, w - 1, h - 1, CHAMFER)
-    ids.append(_glass_polygon(c, shell, width=2))
-    ids.append(c.create_polygon(
-        _chamfer_points(0, 0, w, h, CHAMFER + 1),
-        fill="", outline=CYAN_DIM, width=1))
+    try:
+        ids.append(c.create_polygon(
+            shell, fill=BG, outline=CYAN, width=2, stipple="gray50"))
+    except tk.TclError:
+        ids.append(c.create_polygon(shell, fill=BG, outline=CYAN, width=2))
     net = _chamfer_points(PAD, net_y, w - PAD, net_y + net_h, 6)
-    ids.append(_glass_polygon(c, net))
+    try:
+        ids.append(c.create_polygon(
+            net, fill=BG, outline=CYAN, width=1, stipple="gray50"))
+    except tk.TclError:
+        ids.append(c.create_polygon(net, fill=BG, outline=CYAN, width=1))
     for i in ids:
         c.tag_lower(i)
-    return ids
+
+def _place_glass_bg(c, w, h, net_y, net_h):
+    try:
+        photo = ImageTk.PhotoImage(_create_glass_image(w, h, net_y, net_h))
+        bg_id = c.create_image(0, 0, anchor="nw", image=photo)
+        c.tag_lower(bg_id)
+        return photo
+    except Exception:
+        _draw_glass_stipple(c, w, h, net_y, net_h)
+        return None
 
 def _draw_chamfer(c, x1, y1, x2, y2, cut=CHAMFER, fill="", outline=CYAN, width=1, glow=False):
     ids = []
@@ -368,6 +381,8 @@ class MonitorApp:
         self.canvas = tk.Canvas(self.root, bg=TRANSPARENT, highlightthickness=0,
                                 width=WIDTH, height=400)
         self.canvas.pack()
+
+        self._glass_photo = None
 
         # hwnd — получаем сразу, пока заголовок ещё есть
         self._hwnd = win32gui.FindWindow(None, "PC Monitor")
@@ -604,10 +619,10 @@ class MonitorApp:
 
         total_h = net_y + net_h + PAD
         self.canvas.config(height=total_h)
-        _draw_glass_bg(c, WIDTH, total_h, net_y, net_h)
+        self._glass_photo = _place_glass_bg(c, WIDTH, total_h, net_y, net_h)
 
         pos = load_window_pos()
-        if has_saved_position() and pos:
+        if pos:
             wx, wy = pos
         else:
             mx, my, mw, mh = get_primary_monitor()
@@ -616,8 +631,8 @@ class MonitorApp:
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
         self.root.update_idletasks()
         self._layout_ready = True
-        if not has_saved_position():
-            self._save_position()
+        if pos is None:
+            save_window_pos(wx, wy)
         self._apply_clickthrough()
 
         # Запускаем цикл обновления
@@ -679,10 +694,6 @@ class MonitorApp:
         self.root.after(UPDATE_MS, self._update)
 
     def stop(self):
-        try:
-            self._save_position()
-        except Exception:
-            pass
         self._running = False
         self.root.quit()
 
