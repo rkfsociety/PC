@@ -45,7 +45,7 @@ BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
 GLASS_COLOR = "#0e2438"
-GLASS_STIPPLE = "gray37"
+GLASS_STIPPLE = "gray25"
 BAR_STIPPLE   = "gray50"
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
@@ -190,17 +190,24 @@ def _chamfer_points(x1, y1, x2, y2, cut):
         x1, y1 + cut,
     ]
 
+def _glass_polygon(c, points, outline=CYAN, width=1):
+    try:
+        return c.create_polygon(
+            points, fill=GLASS_COLOR, outline=outline, width=width,
+            stipple=GLASS_STIPPLE)
+    except tk.TclError:
+        return c.create_polygon(
+            points, fill=BG, outline=outline, width=width)
+
 def _draw_glass_bg(c, w, h, net_y, net_h):
     ids = []
     shell = _chamfer_points(1, 1, w - 1, h - 1, CHAMFER)
-    ids.append(c.create_polygon(
-        shell, fill=GLASS_COLOR, outline=CYAN, width=2, stipple=GLASS_STIPPLE))
+    ids.append(_glass_polygon(c, shell, width=2))
     ids.append(c.create_polygon(
         _chamfer_points(0, 0, w, h, CHAMFER + 1),
         fill="", outline=CYAN_DIM, width=1))
     net = _chamfer_points(PAD, net_y, w - PAD, net_y + net_h, 6)
-    ids.append(c.create_polygon(
-        net, fill=GLASS_COLOR, outline=CYAN, width=1, stipple=GLASS_STIPPLE))
+    ids.append(_glass_polygon(c, net))
     for i in ids:
         c.tag_lower(i)
     return ids
