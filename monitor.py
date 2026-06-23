@@ -232,6 +232,17 @@ class MonitorApp:
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, int(ALPHA * 255), win32con.LWA_ALPHA)
 
+    def _set_move_chrome(self, visible):
+        if self._move_border is None:
+            return
+        if visible:
+            self.canvas.itemconfigure(self._move_border, outline=ACCENT_WARN, width=1)
+            self.canvas.itemconfigure(self._move_hint, fill=ACCENT_WARN)
+        else:
+            self.canvas.itemconfigure(self._move_border, outline=BG, width=0)
+            self.canvas.itemconfigure(self._move_hint, fill=BG)
+        self.canvas.update_idletasks()
+
     def _apply_move_mode(self):
         self._apply_window_style()
         if self._move_mode:
@@ -239,20 +250,14 @@ class MonitorApp:
             self.canvas.bind("<ButtonPress-1>", self._drag_start)
             self.canvas.bind("<B1-Motion>", self._drag_move)
             self.canvas.bind("<ButtonRelease-1>", self._drag_stop)
-            if self._move_border is not None:
-                self.canvas.itemconfigure(self._move_border, state="normal")
-            if self._move_hint is not None:
-                self.canvas.itemconfigure(self._move_hint, state="normal")
+            self._set_move_chrome(True)
         else:
             self.canvas.configure(cursor="")
             self.canvas.unbind("<ButtonPress-1>")
             self.canvas.unbind("<B1-Motion>")
             self.canvas.unbind("<ButtonRelease-1>")
             self._save_position()
-            if self._move_border is not None:
-                self.canvas.itemconfigure(self._move_border, state="hidden")
-            if self._move_hint is not None:
-                self.canvas.itemconfigure(self._move_hint, state="hidden")
+            self._set_move_chrome(False)
 
     def _drag_start(self, event):
         self._drag_x = event.x
@@ -391,10 +396,10 @@ class MonitorApp:
         total_h = y + 6
         self.canvas.config(height=total_h)
         self._move_border = c.create_rectangle(
-            1, 1, WIDTH - 1, total_h - 1, outline=ACCENT_WARN, width=1, state="hidden")
+            1, 1, WIDTH - 1, total_h - 1, outline=BG, width=0)
         self._move_hint = c.create_text(
             WIDTH // 2, total_h - 10, text="перетащите", anchor="s",
-            font=FONT_LBL, fill=ACCENT_WARN, state="hidden")
+            font=FONT_LBL, fill=BG)
 
         pos = load_window_pos()
         if pos:
