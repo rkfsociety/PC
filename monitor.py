@@ -44,7 +44,8 @@ TRANSPARENT = "#010001"
 BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
-GLASS_BG_ALPHA = 230
+GLASS_BG_ALPHA_DEFAULT = 10
+BG_TRANSPARENCY_PRESETS = (0, 10, 20, 30, 50, 70)
 PANEL_FILL     = (14, 36, 56, 255)
 BAR_STIPPLE    = "gray50"
 CYAN       = "#00e5ff"
@@ -161,6 +162,22 @@ def save_window_pos(x, y):
         winreg.SetValueEx(key, "y", 0, winreg.REG_SZ, str(int(y)))
         winreg.SetValueEx(key, "placed", 0, winreg.REG_SZ, "1")
 
+def load_bg_transparency():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, POS_KEY, 0, winreg.KEY_READ) as key:
+            pct = int(winreg.QueryValueEx(key, "bg_transparency")[0])
+            return max(0, min(90, pct))
+    except OSError:
+        return GLASS_BG_ALPHA_DEFAULT
+
+def save_bg_transparency(pct):
+    pct = max(0, min(90, int(pct)))
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, POS_KEY) as key:
+        winreg.SetValueEx(key, "bg_transparency", 0, winreg.REG_SZ, str(pct))
+
+def transparency_to_alpha(pct):
+    return int(255 * (1 - pct / 100))
+
 def metric_color(pct):
     if pct < 60:
         return GREEN
@@ -185,11 +202,11 @@ def _chamfer_poly(x1, y1, x2, y2, cut):
     pts = _chamfer_points(x1, y1, x2, y2, cut)
     return [(pts[i], pts[i + 1]) for i in range(0, len(pts), 2)]
 
-def _create_glass_image(w, h, net_y, net_h):
+def _create_glass_image(w, h, net_y, net_h, bg_alpha):
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
-    draw.polygon(shell, fill=(*PANEL_FILL[:3], GLASS_BG_ALPHA))
+    draw.polygon(shell, fill=(*PANEL_FILL[:3], bg_alpha))
     draw.polygon(shell, outline=(0, 229, 255, 255))
     glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
     draw.polygon(glow, outline=(0, 122, 139, 120))
@@ -198,24 +215,33 @@ def _create_glass_image(w, h, net_y, net_h):
     draw.polygon(net, outline=(0, 229, 255, 255))
     return img
 
-def _draw_glass_stipple(c, w, h, net_y, net_h):
+def _draw_glass_stipple(c, w, h, net_y, net_h, bg_alpha):
     ids = []
     shell = _chamfer_points(1, 1, w - 1, h - 1, CHAMFER)
-    ids.append(c.create_polygon(shell, fill=BG, outline=CYAN, width=2))
+    if bg_alpha >= 220:
+        ids.append(c.create_polygon(shell, fill=BG, outline=CYAN, width=2))
+    else:
+        stipple = "gray75" if bg_alpha >= 180 else ("gray50" if bg_alpha >= 128 else "gray25")
+        try:
+            ids.append(c.create_polygon(
+                shell, fill=BG, outline=CYAN, width=2, stipple=stipple))
+        except tk.TclError:
+            ids.append(c.create_polygon(shell, fill=BG, outline=CYAN, width=2))
     net = _chamfer_points(PAD, net_y, w - PAD, net_y + net_h, 6)
     ids.append(c.create_polygon(net, fill=BG, outline=CYAN, width=1))
     for i in ids:
         c.tag_lower(i)
+    return ids[0] if ids else None
 
-def _place_glass_bg(c, w, h, net_y, net_h):
+def _place_glass_bg(c, w, h, net_y, net_h, bg_alpha):
     try:
-        photo = ImageTk.PhotoImage(_create_glass_image(w, h, net_y, net_h))
+        photo = ImageTk.PhotoImage(_create_glass_image(w, h, net_y, net_h, bg_alpha))
         bg_id = c.create_image(0, 0, anchor="nw", image=photo)
         c.tag_lower(bg_id)
-        return photo
+        return photo, bg_id
     except Exception:
-        _draw_glass_stipple(c, w, h, net_y, net_h)
-        return None
+        bg_id = _draw_glass_stipple(c, w, h, net_y, net_h, bg_alpha)
+        return None, bg_id
 
 def _draw_chamfer(c, x1, y1, x2, y2, cut=CHAMFER, fill="", outline=CYAN, width=1, glow=False):
     ids = []
@@ -375,6 +401,11 @@ class MonitorApp:
         self.canvas.pack()
 
         self._glass_photo = None
+        self._glass_bg_id = None
+        self._bg_transparency = load_bg_transparency()
+        self._net_y = 0
+        self._net_h = 0
+        self._total_h = 400
 
         # hwnd — получаем сразу, пока заголовок ещё есть
         self._hwnd = win32gui.FindWindow(None, "PC Monitor")
@@ -405,6 +436,30 @@ class MonitorApp:
 
     def is_move_mode(self):
         return self._move_mode
+
+    def get_bg_transparency(self):
+        return self._bg_transparency
+
+    def set_bg_transparency(self, pct):
+        def apply():
+            pct_clamped = max(0, min(90, int(pct)))
+            if self._bg_transparency == pct_clamped and self._glass_bg_id:
+                return
+            self._bg_transparency = pct_clamped
+            save_bg_transparency(pct_clamped)
+            if not self._layout_ready:
+                return
+            self._refresh_glass_bg()
+        self.root.after(0, apply)
+
+    def _refresh_glass_bg(self):
+        c = self.canvas
+        if self._glass_bg_id is not None:
+            c.delete(self._glass_bg_id)
+            self._glass_bg_id = None
+        alpha = transparency_to_alpha(self._bg_transparency)
+        self._glass_photo, self._glass_bg_id = _place_glass_bg(
+            c, WIDTH, self._total_h, self._net_y, self._net_h, alpha)
 
     def set_move_mode(self, enabled):
         def apply():
@@ -610,8 +665,13 @@ class MonitorApp:
             anchor="ne", font=FONT_NET, fill=GREEN)
 
         total_h = net_y + net_h + PAD
+        self._net_y = net_y
+        self._net_h = net_h
+        self._total_h = total_h
         self.canvas.config(height=total_h)
-        self._glass_photo = _place_glass_bg(c, WIDTH, total_h, net_y, net_h)
+        alpha = transparency_to_alpha(self._bg_transparency)
+        self._glass_photo, self._glass_bg_id = _place_glass_bg(
+            c, WIDTH, total_h, net_y, net_h, alpha)
 
         pos = load_window_pos()
         if pos:
@@ -700,6 +760,20 @@ def run_tray(app):
         want = not app.is_move_mode()
         app.set_move_mode(want)
 
+    def on_transparency(icon, item, pct):
+        app.set_bg_transparency(pct)
+
+    def transparency_menu():
+        return pystray.Menu(*[
+            pystray.MenuItem(
+                f"{pct}%",
+                lambda icon, item, p=pct: on_transparency(icon, item, p),
+                checked=lambda item, p=pct: app.get_bg_transparency() == p,
+                radio=True,
+            )
+            for pct in BG_TRANSPARENCY_PRESETS
+        ])
+
     def on_restart(icon, item):
         try:
             app._save_position()
@@ -728,6 +802,7 @@ def run_tray(app):
                 on_move_mode,
                 checked=lambda item: app.is_move_mode(),
             ),
+            pystray.MenuItem("Прозрачность фона", transparency_menu),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Перезапуск", on_restart),
             pystray.MenuItem("Выход", on_quit),
