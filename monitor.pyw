@@ -25,7 +25,7 @@ import winreg
 import win32api
 import win32con
 import win32gui
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw
 import pystray
 
 try:
@@ -44,6 +44,9 @@ TRANSPARENT = "#010001"
 BG         = "#0a0f14"
 BG_PANEL   = "#0d1520"
 BAR_BG     = "#0a1a22"
+GLASS_COLOR = "#0a1828"
+GLASS_STIPPLE = "gray12"
+BAR_STIPPLE   = "gray25"
 CYAN       = "#00e5ff"
 CYAN_DIM   = "#005f6b"
 GREEN      = "#39ff14"
@@ -52,19 +55,7 @@ ORANGE     = "#ff8c00"
 ORANGE_DIM = "#6b3a00"
 RED        = "#ff4400"
 WHITE      = "#e8f4ff"
-GLASS_MAIN   = (10, 20, 32, 51)
-GLASS_PANEL  = (12, 24, 38, 45)
-GLASS_OUTLINE = 200
-GLASS_GLOW    = 80
 COLORKEY_REF = 0x00010001
-CYAN       = "#00e5ff"
-CYAN_DIM   = "#005f6b"
-GREEN      = "#39ff14"
-GREEN_DIM  = "#145208"
-ORANGE     = "#ff8c00"
-ORANGE_DIM = "#6b3a00"
-RED        = "#ff4400"
-WHITE      = "#e8f4ff"
 BAR_H      = 9
 SEGMENTS   = 22
 DRIVE_H    = 30
@@ -199,33 +190,20 @@ def _chamfer_points(x1, y1, x2, y2, cut):
         x1, y1 + cut,
     ]
 
-def _chamfer_poly(x1, y1, x2, y2, cut):
-    pts = _chamfer_points(x1, y1, x2, y2, cut)
-    return [(pts[i], pts[i + 1]) for i in range(0, len(pts), 2)]
-
-def _hex_rgba(h, alpha=255):
-    h = h.lstrip("#")
-    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-    return (r, g, b, alpha)
-
-def _create_glass_layer(w, h, net_y, net_h):
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    shell = _chamfer_poly(1, 1, w - 1, h - 1, CHAMFER)
-    draw.polygon(shell, fill=GLASS_MAIN)
-    draw.polygon(shell, outline=_hex_rgba(CYAN, GLASS_OUTLINE))
-    glow = _chamfer_poly(0, 0, w, h, CHAMFER + 1)
-    draw.polygon(glow, outline=_hex_rgba(CYAN, GLASS_GLOW))
-    net = _chamfer_poly(PAD, net_y, w - PAD, net_y + net_h, 6)
-    draw.polygon(net, fill=GLASS_PANEL)
-    draw.polygon(net, outline=_hex_rgba(CYAN, GLASS_OUTLINE - 30))
-    return img
-
-def _place_glass_bg(c, w, h, net_y, net_h):
-    photo = ImageTk.PhotoImage(_create_glass_layer(w, h, net_y, net_h))
-    bg_id = c.create_image(0, 0, anchor="nw", image=photo)
-    c.tag_lower(bg_id)
-    return photo, bg_id
+def _draw_glass_bg(c, w, h, net_y, net_h):
+    ids = []
+    shell = _chamfer_points(1, 1, w - 1, h - 1, CHAMFER)
+    ids.append(c.create_polygon(
+        shell, fill=GLASS_COLOR, outline=CYAN, width=1, stipple=GLASS_STIPPLE))
+    ids.append(c.create_polygon(
+        _chamfer_points(0, 0, w, h, CHAMFER + 1),
+        fill="", outline=CYAN_DIM, width=1))
+    net = _chamfer_points(PAD, net_y, w - PAD, net_y + net_h, 6)
+    ids.append(c.create_polygon(
+        net, fill=GLASS_COLOR, outline=CYAN, width=1, stipple=GLASS_STIPPLE))
+    for i in ids:
+        c.tag_lower(i)
+    return ids
 
 def _draw_chamfer(c, x1, y1, x2, y2, cut=CHAMFER, fill="", outline=CYAN, width=1, glow=False):
     ids = []
@@ -285,7 +263,7 @@ class HudMetric:
         self.lbl_id = _glow_text(c, x, y, label, FONT_LABEL, CYAN, "nw")
         self.val_id = _glow_text(c, x + w, y, "", FONT_VALUE, GREEN, "ne")
         c.create_rectangle(x, self.bar_y, x + w, self.bar_y + BAR_H,
-                           outline=CYAN, fill=BAR_BG, width=1)
+                           outline=CYAN, fill=BAR_BG, width=1, stipple=BAR_STIPPLE)
         self.fill_id = c.create_rectangle(
             x + 1, self.bar_y + 1, x + 2, self.bar_y + BAR_H - 1,
             fill=GREEN, outline="")
@@ -313,7 +291,8 @@ class SegmentedBar:
         sw = max(2, (w - gap * (n - 1)) // n)
         for i in range(n):
             sx = x + i * (sw + gap)
-            c.create_rectangle(sx, y, sx + sw, y + self.h, outline=CYAN, fill=BAR_BG, width=1)
+            c.create_rectangle(sx, y, sx + sw, y + self.h, outline=CYAN, fill=BAR_BG,
+                               width=1, stipple=BAR_STIPPLE)
             fid = c.create_rectangle(sx + 1, y + 1, sx + sw - 1, y + self.h - 1,
                                        fill=GREEN, outline="")
             self.segs.append((fid, sx, sw))
@@ -382,8 +361,6 @@ class MonitorApp:
         self.canvas = tk.Canvas(self.root, bg=TRANSPARENT, highlightthickness=0,
                                 width=WIDTH, height=400)
         self.canvas.pack()
-
-        self._glass_photo = None
 
         # hwnd — получаем сразу, пока заголовок ещё есть
         self._hwnd = win32gui.FindWindow(None, "PC Monitor")
@@ -619,7 +596,7 @@ class MonitorApp:
 
         total_h = net_y + net_h + PAD
         self.canvas.config(height=total_h)
-        self._glass_photo, _ = _place_glass_bg(c, WIDTH, total_h, net_y, net_h)
+        _draw_glass_bg(c, WIDTH, total_h, net_y, net_h)
 
         pos = load_window_pos()
         if has_saved_position() and pos:
