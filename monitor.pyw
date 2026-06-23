@@ -213,10 +213,33 @@ class MonitorApp:
         return self._move_mode
 
     def set_move_mode(self, enabled):
-        if self._move_mode == enabled:
-            return
-        self._move_mode = enabled
-        self.root.after(0, self._apply_move_mode)
+        def apply():
+            if self._move_mode == enabled:
+                return
+            self._move_mode = enabled
+            self._apply_move_mode()
+        self.root.after(0, apply)
+
+    def _show_move_chrome(self):
+        self._hide_move_chrome()
+        h = self.canvas.winfo_height()
+        self._move_border = self.canvas.create_rectangle(
+            1, 1, WIDTH - 1, h - 1, outline=ACCENT_WARN, width=2)
+        self._move_hint = self.canvas.create_text(
+            WIDTH // 2, h - 10, text="перетащите", anchor="s",
+            font=FONT_LBL, fill=ACCENT_WARN)
+        self.canvas.tag_raise(self._move_border)
+        self.canvas.tag_raise(self._move_hint)
+
+    def _hide_move_chrome(self):
+        for item in (self._move_border, self._move_hint):
+            if item is not None:
+                self.canvas.delete(item)
+        self._move_border = None
+        self._move_hint = None
+        if self._hwnd:
+            win32gui.InvalidateRect(self._hwnd, None, True)
+            win32gui.UpdateWindow(self._hwnd)
 
     def _apply_window_style(self):
         hwnd = self._hwnd
@@ -232,32 +255,23 @@ class MonitorApp:
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, int(ALPHA * 255), win32con.LWA_ALPHA)
 
-    def _set_move_chrome(self, visible):
-        if self._move_border is None:
-            return
-        if visible:
-            self.canvas.itemconfigure(self._move_border, outline=ACCENT_WARN, width=1)
-            self.canvas.itemconfigure(self._move_hint, fill=ACCENT_WARN)
-        else:
-            self.canvas.itemconfigure(self._move_border, outline=BG, width=0)
-            self.canvas.itemconfigure(self._move_hint, fill=BG)
-        self.canvas.update_idletasks()
-
     def _apply_move_mode(self):
-        self._apply_window_style()
         if self._move_mode:
+            self._apply_window_style()
             self.canvas.configure(cursor="fleur")
             self.canvas.bind("<ButtonPress-1>", self._drag_start)
             self.canvas.bind("<B1-Motion>", self._drag_move)
             self.canvas.bind("<ButtonRelease-1>", self._drag_stop)
-            self._set_move_chrome(True)
+            self._show_move_chrome()
         else:
             self.canvas.configure(cursor="")
             self.canvas.unbind("<ButtonPress-1>")
             self.canvas.unbind("<B1-Motion>")
             self.canvas.unbind("<ButtonRelease-1>")
+            self._hide_move_chrome()
             self._save_position()
-            self._set_move_chrome(False)
+            self._apply_window_style()
+            self.root.update_idletasks()
 
     def _drag_start(self, event):
         self._drag_x = event.x
@@ -395,11 +409,6 @@ class MonitorApp:
 
         total_h = y + 6
         self.canvas.config(height=total_h)
-        self._move_border = c.create_rectangle(
-            1, 1, WIDTH - 1, total_h - 1, outline=BG, width=0)
-        self._move_hint = c.create_text(
-            WIDTH // 2, total_h - 10, text="перетащите", anchor="s",
-            font=FONT_LBL, fill=BG)
 
         pos = load_window_pos()
         if pos:
@@ -476,7 +485,8 @@ def run_tray(app):
         set_autostart(not is_autostart_enabled())
 
     def on_move_mode(icon, item):
-        app.set_move_mode(not app.is_move_mode())
+        want = not app.is_move_mode()
+        app.set_move_mode(want)
 
     def on_quit(icon, item):
         icon.stop()
