@@ -36,19 +36,29 @@ except Exception:
 
 # ========= Конфиг =========
 UPDATE_MS  = 1000
-WIDTH      = 270
-ALPHA      = 0.88
-BG         = "#0d0d0d"
-FG         = "#e0e0e0"
-DIM        = "#606060"
-ACCENT_OK  = "#29d97a"
-ACCENT_WARN= "#f0c040"
-ACCENT_HOT = "#f04040"
-BAR_BG     = "#1e1e1e"
-MARGIN     = 10
-FONT_VAL   = ("Consolas", 9)
-FONT_LBL   = ("Consolas", 8)
-FONT_SEC   = ("Consolas", 8, "bold")
+WIDTH      = 300
+ALPHA      = 0.94
+PAD        = 14
+BG         = "#12121a"
+BORDER     = "#2d2d3f"
+FG         = "#ececf4"
+MUTED      = "#7a7a92"
+ACCENT     = "#7b8cff"
+ACCENT_OK  = "#34d399"
+ACCENT_WARN= "#fbbf24"
+ACCENT_HOT = "#f87171"
+NET_UP     = "#60a5fa"
+NET_DOWN   = "#34d399"
+BAR_BG     = "#252532"
+BAR_H      = 6
+CORE_H     = 22
+SHELL_R    = 12
+
+FONT_TITLE = ("Segoe UI", 11, "bold")
+FONT_SEC   = ("Segoe UI", 8, "bold")
+FONT_LBL   = ("Segoe UI", 9)
+FONT_VAL   = ("Segoe UI", 9, "bold")
+FONT_SMALL = ("Segoe UI", 8)
 
 AUTOSTART_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "PCMonitor"
@@ -134,9 +144,32 @@ def save_window_pos(x, y):
         winreg.SetValueEx(key, "y", 0, winreg.REG_SZ, str(int(y)))
 
 def bar_color(pct):
-    if pct < 60:   return ACCENT_OK
-    if pct < 85:   return ACCENT_WARN
+    if pct < 60:
+        return ACCENT_OK
+    if pct < 85:
+        return ACCENT_WARN
     return ACCENT_HOT
+
+def _round_rect(c, x1, y1, x2, y2, r, **kw):
+    r = max(1, min(r, (x2 - x1) // 2, (y2 - y1) // 2))
+    fill = kw.get("fill", "")
+    outline = kw.get("outline", "")
+    width = kw.get("width", 0)
+    style = dict(fill=fill, outline=outline, width=width)
+    ids = [
+        c.create_arc(x1, y1, x1 + 2 * r, y1 + 2 * r, start=90, extent=90, style="pieslice", **style),
+        c.create_arc(x2 - 2 * r, y1, x2, y1 + 2 * r, start=0, extent=90, style="pieslice", **style),
+        c.create_arc(x1, y2 - 2 * r, x1 + 2 * r, y2, start=180, extent=90, style="pieslice", **style),
+        c.create_arc(x2 - 2 * r, y2 - 2 * r, x2, y2, start=270, extent=90, style="pieslice", **style),
+        c.create_rectangle(x1 + r, y1, x2 - r, y2, **style),
+        c.create_rectangle(x1, y1 + r, x2, y2 - r, **style),
+    ]
+    return ids
+
+def _draw_shell(c, w, h):
+    for i in _round_rect(c, 0, 0, w, h, SHELL_R, fill=BG, outline=BORDER, width=1):
+        c.tag_lower(i)
+    c.create_line(PAD, 1, w - PAD, 1, fill=ACCENT, width=2, capstyle=tk.ROUND)
 
 def get_primary_monitor():
     for hMon, _, _ in win32api.EnumDisplayMonitors():
@@ -150,43 +183,47 @@ def get_primary_monitor():
     return mx, my, mr - mx, mb - my
 
 def make_tray_icon():
-    img = Image.new("RGB", (64, 64), "#1a1a1a")
+    img = Image.new("RGB", (64, 64), BG)
     d = ImageDraw.Draw(img)
-    d.rectangle([8,  40, 18, 56], fill=ACCENT_OK)
-    d.rectangle([22, 28, 32, 56], fill=ACCENT_WARN)
-    d.rectangle([36, 16, 46, 56], fill=ACCENT_HOT)
+    d.rounded_rectangle([10, 10, 54, 54], radius=10, fill="#1a1a26", outline=BORDER, width=2)
+    d.rounded_rectangle([18, 36, 26, 48], radius=2, fill=ACCENT_OK)
+    d.rounded_rectangle([28, 28, 36, 48], radius=2, fill=ACCENT_WARN)
+    d.rounded_rectangle([38, 18, 46, 48], radius=2, fill=ACCENT_HOT)
     return img
 
 # ========= Строитель статичного макета =========
 # Макет строится один раз; при обновлении меняются только coords/fill текстов и баров.
 
 class Row:
-    """Одна строка: label слева, value справа, бар под ними."""
-    def __init__(self, c, x0, y, bar_w, bar_h, label_text):
+    """Строка метрики: подпись, значение, скруглённый прогресс-бар."""
+    def __init__(self, c, x0, y, bar_w, label_text):
         self.c = c
         self.bar_w = bar_w
-        self.bar_h = bar_h
         self.x0 = x0
-        self.bar_y = y + 13
+        self.bar_y = y + 17
+        self.bar_h = BAR_H
 
-        self.lbl_id = c.create_text(x0, y, text=label_text,
-                                    anchor="nw", font=FONT_LBL, fill=DIM)
-        self.val_id = c.create_text(WIDTH - x0, y, text="",
-                                    anchor="ne", font=FONT_LBL, fill=FG)
-        # фон бара (статичный)
-        c.create_rectangle(x0, self.bar_y, x0 + bar_w, self.bar_y + bar_h,
-                           fill=BAR_BG, outline="")
-        # заполнение бара (динамичный)
-        self.bar_id = c.create_rectangle(x0, self.bar_y, x0 + 2, self.bar_y + bar_h,
-                                         fill=ACCENT_OK, outline="")
+        self.lbl_id = c.create_text(
+            x0, y, text=label_text, anchor="nw", font=FONT_LBL, fill=MUTED)
+        self.val_id = c.create_text(
+            x0 + bar_w, y, text="", anchor="ne", font=FONT_VAL, fill=FG)
+        for i in _round_rect(
+            c, x0, self.bar_y, x0 + bar_w, self.bar_y + self.bar_h,
+            self.bar_h // 2, fill=BAR_BG, outline=""):
+            pass
+        self.bar_id = c.create_rectangle(
+            x0, self.bar_y, x0 + 2, self.bar_y + self.bar_h,
+            fill=ACCENT_OK, outline="")
 
     def update(self, val_text, pct):
-        fill = max(2, int(self.bar_w * pct / 100))
-        self.c.itemconfig(self.val_id, text=val_text)
-        self.c.itemconfig(self.bar_id, fill=bar_color(pct))
-        self.c.coords(self.bar_id,
-                      self.x0, self.bar_y,
-                      self.x0 + fill, self.bar_y + self.bar_h)
+        fill = max(self.bar_h, int(self.bar_w * pct / 100))
+        clr = bar_color(pct)
+        self.c.itemconfig(self.val_id, text=val_text, fill=clr if pct >= 55 else FG)
+        self.c.itemconfig(self.bar_id, fill=clr)
+        self.c.coords(
+            self.bar_id,
+            self.x0, self.bar_y,
+            self.x0 + fill, self.bar_y + self.bar_h)
 
     @property
     def bottom(self):
@@ -248,10 +285,10 @@ class MonitorApp:
         self._hide_move_chrome()
         h = self.canvas.winfo_height()
         self._move_border = self.canvas.create_rectangle(
-            1, 1, WIDTH - 1, h - 1, outline=ACCENT_WARN, width=2)
+            2, 2, WIDTH - 2, h - 2, outline=ACCENT, width=2)
         self._move_hint = self.canvas.create_text(
-            WIDTH // 2, h - 10, text="перетащите", anchor="s",
-            font=FONT_LBL, fill=ACCENT_WARN)
+            WIDTH // 2, h - PAD, text="перетащите", anchor="s",
+            font=FONT_SMALL, fill=ACCENT)
         self.canvas.tag_raise(self._move_border)
         self.canvas.tag_raise(self._move_hint)
 
@@ -389,74 +426,76 @@ class MonitorApp:
     # ---- построение макета (один раз) ----
     def _build_layout(self):
         c  = self.canvas
-        x0 = 10
-        y  = 8
-        bw = WIDTH - x0 * 2
-        bh = 6
+        x0 = PAD
+        y  = PAD
+        bw = WIDTH - PAD * 2
+
+        c.create_text(x0, y, text="PC Monitor", anchor="nw", font=FONT_TITLE, fill=FG)
+        c.create_oval(WIDTH - PAD - 7, y + 5, WIDTH - PAD, y + 12,
+                      fill=ACCENT_OK, outline="")
+        y += 24
+        c.create_line(x0, y, x0 + bw, y, fill=BORDER)
+        y += 12
 
         def sec(title):
             nonlocal y
-            c.create_text(x0, y, text=title, anchor="nw",
-                          font=FONT_SEC, fill="#777")
-            y += 14
+            c.create_text(x0, y, text=title.upper(), anchor="nw",
+                          font=FONT_SEC, fill=MUTED)
+            y += 16
 
         def row(label):
             nonlocal y
-            r = Row(c, x0, y, bw, bh, label)
-            y = r.bottom + 8
+            r = Row(c, x0, y, bw, label)
+            y = r.bottom + 10
             return r
 
-        # CPU
-        sec("CPU")
+        sec("Процессор")
         self._r_cpu = row("Нагрузка")
 
-        # мини-бары ядер
         with self._lock:
             ncores = max(len(self._cores), psutil.cpu_count())
         ncols = min(ncores, 16)
-        cw = (bw - (ncols - 1) * 2) // ncols
-        self._core_bars = []   # (bg_id, fill_id, bar_h, cx, cy)
+        gap = 3
+        cw = max(2, (bw - (ncols - 1) * gap) // ncols)
+        self._core_bars = []
         for i in range(ncols):
-            cx = x0 + i * (cw + 2)
-            c.create_rectangle(cx, y, cx + cw, y + bh, fill=BAR_BG, outline="")
-            fid = c.create_rectangle(cx, y + bh - 1, cx + cw, y + bh,
+            cx = x0 + i * (cw + gap)
+            c.create_rectangle(cx, y, cx + cw, y + CORE_H, fill=BAR_BG, outline="")
+            fid = c.create_rectangle(cx, y + CORE_H - 2, cx + cw, y + CORE_H,
                                      fill=ACCENT_OK, outline="")
-            self._core_bars.append((fid, bh, cx, y))
-        y += bh + 10
+            self._core_bars.append((fid, CORE_H, cx, y, cw))
+        y += CORE_H + 12
 
-        # RAM
-        sec("ПАМЯТЬ")
+        sec("Память")
         self._r_ram = row("RAM")
 
-        # GPU (секция всегда в макете; скрываем если нет GPU)
         self._gpu_y_start = y
-        sec("GPU")
+        sec("Видеокарта")
         self._r_gpu_load = row("Нагрузка")
         self._r_gpu_vram = row("VRAM")
         self._txt_gpu_temp = c.create_text(x0, y, text="", anchor="nw",
-                                           font=FONT_LBL, fill=ACCENT_OK)
+                                           font=FONT_SMALL, fill=ACCENT_OK)
         self._gpu_temp_y = y
         y += 14
         self._gpu_y_end = y
 
-        # Сеть
-        sec("СЕТЬ")
-        self._txt_net_up   = c.create_text(x0,        y, text="↑ 0.00 МБ/с",
-                                           anchor="nw", font=FONT_LBL, fill=DIM)
-        self._txt_net_down = c.create_text(WIDTH - x0, y, text="↓ 0.00 МБ/с",
-                                           anchor="ne", font=FONT_LBL, fill=FG)
-        y += 14
+        sec("Сеть")
+        self._txt_net_up = c.create_text(
+            x0, y, text="↑ 0.00 МБ/с", anchor="nw", font=FONT_LBL, fill=NET_UP)
+        self._txt_net_down = c.create_text(
+            x0 + bw, y, text="↓ 0.00 МБ/с", anchor="ne", font=FONT_LBL, fill=NET_DOWN)
+        y += 18
 
-        # Диски (до 4)
-        sec("ДИСКИ")
+        sec("Диски")
         self._disk_rows = {}
         with self._lock:
             drives = sorted(self._disk.keys())
         for drv in drives[:4]:
             self._disk_rows[drv] = row(drv)
 
-        total_h = y + 6
+        total_h = y + PAD
         self.canvas.config(height=total_h)
+        _draw_shell(c, WIDTH, total_h)
 
         pos = load_window_pos()
         if pos:
@@ -487,12 +526,10 @@ class MonitorApp:
 
         self._r_cpu.update(f"{cpu:.0f}%", cpu)
 
-        x0 = 10
-        bw = WIDTH - x0 * 2
-        for i, (fid, bh, cx, cy) in enumerate(self._core_bars):
+        for i, (fid, bh, cx, cy, cw) in enumerate(self._core_bars):
             cp = cores[i] if i < len(cores) else 0
-            fh = max(1, int(bh * cp / 100))
-            c.coords(fid, cx, cy + bh - fh, cx + (bw // len(self._core_bars)), cy + bh)
+            fh = max(2, int(bh * cp / 100))
+            c.coords(fid, cx, cy + bh - fh, cx + cw, cy + bh)
             c.itemconfig(fid, fill=bar_color(cp))
 
         used, total, pct = ram
