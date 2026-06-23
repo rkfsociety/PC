@@ -52,6 +52,7 @@ FONT_SEC   = ("Consolas", 8, "bold")
 
 AUTOSTART_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "PCMonitor"
+POS_KEY        = r"Software\PCMonitor"
 MUTEX_NAME     = "Global\\PCMonitor_SingleInstance"
 _instance_mutex  = None
 
@@ -93,6 +94,20 @@ def set_autostart(enabled):
                 winreg.DeleteValue(key, AUTOSTART_NAME)
             except FileNotFoundError:
                 pass
+
+def load_window_pos():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, POS_KEY, 0, winreg.KEY_READ) as key:
+            x = winreg.QueryValueEx(key, "x")[0]
+            y = winreg.QueryValueEx(key, "y")[0]
+            return int(x), int(y)
+    except OSError:
+        return None
+
+def save_window_pos(x, y):
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, POS_KEY) as key:
+        winreg.SetValueEx(key, "x", 0, winreg.REG_DWORD, int(x))
+        winreg.SetValueEx(key, "y", 0, winreg.REG_DWORD, int(y))
 
 def bar_color(pct):
     if pct < 60:   return ACCENT_OK
@@ -183,21 +198,79 @@ class MonitorApp:
         self._net_prev  = psutil.net_io_counters()
         self._net_time  = time.time()
         self._running   = True
+        self._move_mode = False
+        self._drag_x    = 0
+        self._drag_y    = 0
+        self._move_border = None
+        self._move_hint   = None
 
         threading.Thread(target=self._metrics_loop, daemon=True).start()
 
         # Строим макет через 700 мс (дать метрикам первый цикл)
         self.root.after(700, self._build_layout)
 
-    def _apply_clickthrough(self):
+    def is_move_mode(self):
+        return self._move_mode
+
+    def set_move_mode(self, enabled):
+        if self._move_mode == enabled:
+            return
+        self._move_mode = enabled
+        self.root.after(0, self._apply_move_mode)
+
+    def _apply_window_style(self):
         hwnd = self._hwnd
         if not hwnd:
             return
         style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        style |= win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED
+        style |= win32con.WS_EX_LAYERED
+        if self._move_mode:
+            style &= ~win32con.WS_EX_TRANSPARENT
+        else:
+            style |= win32con.WS_EX_TRANSPARENT
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, int(ALPHA * 255), win32con.LWA_ALPHA)
+
+    def _apply_move_mode(self):
+        self._apply_window_style()
+        if self._move_mode:
+            self.canvas.configure(cursor="fleur")
+            self.canvas.bind("<ButtonPress-1>", self._drag_start)
+            self.canvas.bind("<B1-Motion>", self._drag_move)
+            self.canvas.bind("<ButtonRelease-1>", self._drag_stop)
+            if self._move_border is not None:
+                self.canvas.itemconfigure(self._move_border, state="normal")
+            if self._move_hint is not None:
+                self.canvas.itemconfigure(self._move_hint, state="normal")
+        else:
+            self.canvas.configure(cursor="")
+            self.canvas.unbind("<ButtonPress-1>")
+            self.canvas.unbind("<B1-Motion>")
+            self.canvas.unbind("<ButtonRelease-1>")
+            self._save_position()
+            if self._move_border is not None:
+                self.canvas.itemconfigure(self._move_border, state="hidden")
+            if self._move_hint is not None:
+                self.canvas.itemconfigure(self._move_hint, state="hidden")
+
+    def _drag_start(self, event):
+        self._drag_x = event.x
+        self._drag_y = event.y
+
+    def _drag_move(self, event):
+        x = self.root.winfo_x() + event.x - self._drag_x
+        y = self.root.winfo_y() + event.y - self._drag_y
+        self.root.geometry(f"+{x}+{y}")
+
+    def _drag_stop(self, _event):
+        self._save_position()
+
+    def _save_position(self):
+        save_window_pos(self.root.winfo_x(), self.root.winfo_y())
+
+    def _apply_clickthrough(self):
+        self._apply_window_style()
 
     # ---- метрики ----
     def _metrics_loop(self):
@@ -317,9 +390,19 @@ class MonitorApp:
 
         total_h = y + 6
         self.canvas.config(height=total_h)
-        mx, my, mw, mh = get_secondary_monitor()
-        wx = mx + mw - WIDTH - MARGIN
-        wy = my + mh - total_h - MARGIN
+        self._move_border = c.create_rectangle(
+            1, 1, WIDTH - 1, total_h - 1, outline=ACCENT_WARN, width=1, state="hidden")
+        self._move_hint = c.create_text(
+            WIDTH // 2, total_h - 10, text="перетащите", anchor="s",
+            font=FONT_LBL, fill=ACCENT_WARN, state="hidden")
+
+        pos = load_window_pos()
+        if pos:
+            wx, wy = pos
+        else:
+            mx, my, mw, mh = get_secondary_monitor()
+            wx = mx + mw - WIDTH - MARGIN
+            wy = my + mh - total_h - MARGIN
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
         self._apply_clickthrough()
 
@@ -387,6 +470,9 @@ def run_tray(app):
     def on_autostart(icon, item):
         set_autostart(not is_autostart_enabled())
 
+    def on_move_mode(icon, item):
+        app.set_move_mode(not app.is_move_mode())
+
     def on_quit(icon, item):
         icon.stop()
         app.stop()
@@ -400,6 +486,11 @@ def run_tray(app):
                 "Запускать с Windows",
                 on_autostart,
                 checked=lambda item: is_autostart_enabled(),
+            ),
+            pystray.MenuItem(
+                "Перемещение",
+                on_move_mode,
+                checked=lambda item: app.is_move_mode(),
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Выход", on_quit),
