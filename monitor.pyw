@@ -34,31 +34,35 @@ try:
 except Exception:
     HAS_GPUTIL = False
 
-# ========= Конфиг =========
+# ========= Конфиг / HUD-тема =========
 UPDATE_MS  = 1000
-WIDTH      = 300
-ALPHA      = 0.94
-PAD        = 14
-BG         = "#12121a"
-BORDER     = "#2d2d3f"
-FG         = "#ececf4"
-MUTED      = "#7a7a92"
-ACCENT     = "#7b8cff"
-ACCENT_OK  = "#34d399"
-ACCENT_WARN= "#fbbf24"
-ACCENT_HOT = "#f87171"
-NET_UP     = "#60a5fa"
-NET_DOWN   = "#34d399"
-BAR_BG     = "#252532"
-BAR_H      = 6
-CORE_H     = 22
-SHELL_R    = 12
+WIDTH      = 520
+ALPHA      = 0.90
+PAD        = 12
+CHAMFER    = 10
+COL_GAP    = 10
+BG         = "#0a0f14"
+BG_PANEL   = "#0d1520"
+BAR_BG     = "#0a1a22"
+CYAN       = "#00e5ff"
+CYAN_DIM   = "#005f6b"
+GREEN      = "#39ff14"
+GREEN_DIM  = "#145208"
+ORANGE     = "#ff8c00"
+ORANGE_DIM = "#6b3a00"
+RED        = "#ff4400"
+WHITE      = "#e8f4ff"
+BAR_H      = 9
+SEGMENTS   = 22
+DRIVE_H    = 30
 
-FONT_TITLE = ("Segoe UI", 11, "bold")
-FONT_SEC   = ("Segoe UI", 8, "bold")
-FONT_LBL   = ("Segoe UI", 9)
-FONT_VAL   = ("Segoe UI", 9, "bold")
-FONT_SMALL = ("Segoe UI", 8)
+FONT_TITLE = ("Bahnschrift SemiBold", 12, "bold")
+FONT_LABEL = ("Bahnschrift SemiBold", 8, "bold")
+FONT_VALUE = ("Bahnschrift SemiBold", 9, "bold")
+FONT_SMALL = ("Bahnschrift SemiBold", 8)
+FONT_TEMP  = ("Bahnschrift SemiBold", 34, "bold")
+FONT_TLBL  = ("Bahnschrift SemiBold", 9, "bold")
+FONT_NET   = ("Bahnschrift SemiBold", 9, "bold")
 
 AUTOSTART_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "PCMonitor"
@@ -152,33 +156,55 @@ def save_window_pos(x, y):
         winreg.SetValueEx(key, "x", 0, winreg.REG_SZ, str(int(x)))
         winreg.SetValueEx(key, "y", 0, winreg.REG_SZ, str(int(y)))
 
-def bar_color(pct):
+def metric_color(pct):
     if pct < 60:
-        return ACCENT_OK
+        return GREEN
     if pct < 85:
-        return ACCENT_WARN
-    return ACCENT_HOT
+        return ORANGE
+    return RED
 
-def _round_rect(c, x1, y1, x2, y2, r, **kw):
-    r = max(1, min(r, (x2 - x1) // 2, (y2 - y1) // 2))
-    fill = kw.get("fill", "")
-    outline = kw.get("outline", "")
-    width = kw.get("width", 0)
-    style = dict(fill=fill, outline=outline, width=width)
-    ids = [
-        c.create_arc(x1, y1, x1 + 2 * r, y1 + 2 * r, start=90, extent=90, style="pieslice", **style),
-        c.create_arc(x2 - 2 * r, y1, x2, y1 + 2 * r, start=0, extent=90, style="pieslice", **style),
-        c.create_arc(x1, y2 - 2 * r, x1 + 2 * r, y2, start=180, extent=90, style="pieslice", **style),
-        c.create_arc(x2 - 2 * r, y2 - 2 * r, x2, y2, start=270, extent=90, style="pieslice", **style),
-        c.create_rectangle(x1 + r, y1, x2 - r, y2, **style),
-        c.create_rectangle(x1, y1 + r, x2, y2 - r, **style),
+def _chamfer_points(x1, y1, x2, y2, cut):
+    cut = max(2, min(cut, (x2 - x1) // 3, (y2 - y1) // 3))
+    return [
+        x1 + cut, y1,
+        x2 - cut, y1,
+        x2, y1 + cut,
+        x2, y2 - cut,
+        x2 - cut, y2,
+        x1 + cut, y2,
+        x1, y2 - cut,
+        x1, y1 + cut,
     ]
+
+def _draw_chamfer(c, x1, y1, x2, y2, cut=CHAMFER, fill=BG, outline=CYAN, width=1, glow=False):
+    ids = []
+    if glow and outline:
+        pts = _chamfer_points(x1, y1, x2, y2, cut)
+        ids.append(c.create_polygon(pts, fill="", outline=CYAN_DIM, width=2))
+    pts = _chamfer_points(x1, y1, x2, y2, cut)
+    ids.append(c.create_polygon(pts, fill=fill, outline=outline, width=width))
     return ids
 
+def _glow_text(c, x, y, text, font, color, anchor="nw"):
+    dim = CYAN_DIM if color == CYAN else (ORANGE_DIM if color == ORANGE else GREEN_DIM)
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1)):
+        c.create_text(x + dx, y + dy, text=text, font=font, fill=dim, anchor=anchor)
+    return c.create_text(x, y, text=text, font=font, fill=color, anchor=anchor)
+
 def _draw_shell(c, w, h):
-    for i in _round_rect(c, 0, 0, w, h, SHELL_R, fill=BG, outline=BORDER, width=1):
+    for i in _draw_chamfer(c, 1, 1, w - 1, h - 1, CHAMFER, fill=BG, outline=CYAN, width=1, glow=True):
         c.tag_lower(i)
-    c.create_line(PAD, 1, w - PAD, 1, fill=ACCENT, width=2, capstyle=tk.ROUND)
+
+def get_cpu_temp():
+    try:
+        temps = psutil.sensors_temperatures()
+        if temps:
+            for entries in temps.values():
+                if entries:
+                    return entries[0].current
+    except Exception:
+        pass
+    return None
 
 def get_primary_monitor():
     for hMon, _, _ in win32api.EnumDisplayMonitors():
@@ -191,52 +217,120 @@ def get_primary_monitor():
     mx, my, mr, mb = info["Monitor"]
     return mx, my, mr - mx, mb - my
 
+def clamp_window_pos(wx, wy, w, h):
+    for hMon, _, _ in win32api.EnumDisplayMonitors():
+        info = win32api.GetMonitorInfo(hMon)
+        mx, my, mr, mb = info["Monitor"]
+        if wx + w > mx and wx < mr and wy + h > my and wy < mb:
+            return (
+                max(mx, min(wx, mr - w)),
+                max(my, min(wy, mb - h)),
+            )
+    mx, my, mw, mh = get_primary_monitor()
+    return mx + (mw - w) // 2, my + (mh - h) // 2
+
 def make_tray_icon():
     img = Image.new("RGB", (64, 64), BG)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([10, 10, 54, 54], radius=10, fill="#1a1a26", outline=BORDER, width=2)
-    d.rounded_rectangle([18, 36, 26, 48], radius=2, fill=ACCENT_OK)
-    d.rounded_rectangle([28, 28, 36, 48], radius=2, fill=ACCENT_WARN)
-    d.rounded_rectangle([38, 18, 46, 48], radius=2, fill=ACCENT_HOT)
+    pts = [12, 8, 52, 8, 56, 12, 56, 52, 52, 56, 12, 56, 8, 52, 8, 12]
+    d.polygon(pts, fill=BG_PANEL, outline=CYAN)
+    d.rectangle([18, 38, 24, 48], fill=GREEN)
+    d.rectangle([28, 30, 34, 48], fill=ORANGE)
+    d.rectangle([38, 22, 44, 48], fill=CYAN)
     return img
 
-# ========= Строитель статичного макета =========
-# Макет строится один раз; при обновлении меняются только coords/fill текстов и баров.
+# ========= HUD-виджеты =========
 
-class Row:
-    """Строка метрики: подпись, значение, скруглённый прогресс-бар."""
-    def __init__(self, c, x0, y, bar_w, label_text):
+class HudMetric:
+    def __init__(self, c, x, y, w, label):
         self.c = c
-        self.bar_w = bar_w
-        self.x0 = x0
-        self.bar_y = y + 17
-        self.bar_h = BAR_H
-
-        self.lbl_id = c.create_text(
-            x0, y, text=label_text, anchor="nw", font=FONT_LBL, fill=MUTED)
-        self.val_id = c.create_text(
-            x0 + bar_w, y, text="", anchor="ne", font=FONT_VAL, fill=FG)
-        for i in _round_rect(
-            c, x0, self.bar_y, x0 + bar_w, self.bar_y + self.bar_h,
-            self.bar_h // 2, fill=BAR_BG, outline=""):
-            pass
-        self.bar_id = c.create_rectangle(
-            x0, self.bar_y, x0 + 2, self.bar_y + self.bar_h,
-            fill=ACCENT_OK, outline="")
+        self.x = x
+        self.w = w
+        self.bar_y = y + 15
+        self.lbl_id = _glow_text(c, x, y, label, FONT_LABEL, CYAN, "nw")
+        self.val_id = _glow_text(c, x + w, y, "", FONT_VALUE, GREEN, "ne")
+        c.create_rectangle(x, self.bar_y, x + w, self.bar_y + BAR_H,
+                           outline=CYAN, fill=BAR_BG, width=1)
+        self.fill_id = c.create_rectangle(
+            x + 1, self.bar_y + 1, x + 2, self.bar_y + BAR_H - 1,
+            fill=GREEN, outline="")
 
     def update(self, val_text, pct):
-        fill = max(self.bar_h, int(self.bar_w * pct / 100))
-        clr = bar_color(pct)
-        self.c.itemconfig(self.val_id, text=val_text, fill=clr if pct >= 55 else FG)
-        self.c.itemconfig(self.bar_id, fill=clr)
-        self.c.coords(
-            self.bar_id,
-            self.x0, self.bar_y,
-            self.x0 + fill, self.bar_y + self.bar_h)
+        clr = metric_color(pct)
+        self.c.itemconfig(self.val_id, text=val_text, fill=clr)
+        fill = max(2, int((self.w - 2) * pct / 100))
+        self.c.itemconfig(self.fill_id, fill=clr)
+        self.c.coords(self.fill_id,
+                      self.x + 1, self.bar_y + 1,
+                      self.x + 1 + fill, self.bar_y + BAR_H - 1)
 
     @property
     def bottom(self):
-        return self.bar_y + self.bar_h
+        return self.bar_y + BAR_H
+
+class SegmentedBar:
+    def __init__(self, c, x, y, w, n=SEGMENTS):
+        self.c = c
+        self.y = y
+        self.h = BAR_H
+        self.segs = []
+        gap = 2
+        sw = max(2, (w - gap * (n - 1)) // n)
+        for i in range(n):
+            sx = x + i * (sw + gap)
+            c.create_rectangle(sx, y, sx + sw, y + self.h, outline=CYAN, fill=BAR_BG, width=1)
+            fid = c.create_rectangle(sx + 1, y + 1, sx + sw - 1, y + self.h - 1,
+                                       fill=GREEN, outline="")
+            self.segs.append((fid, sx, sw))
+
+    def update(self, pct):
+        lit = int(len(self.segs) * pct / 100 + 0.5)
+        clr = metric_color(pct)
+        for i, (fid, sx, sw) in enumerate(self.segs):
+            if i < lit:
+                self.c.coords(fid, sx + 1, self.y + 1, sx + sw - 1, self.y + self.h - 1)
+                self.c.itemconfig(fid, fill=clr, state="normal")
+            else:
+                self.c.itemconfig(fid, state="hidden")
+
+    @property
+    def bottom(self):
+        return self.y + self.h
+
+class DriveRow:
+    def __init__(self, c, x, y, w, name):
+        self.c = c
+        self.x = x
+        self.y = y
+        self.w = w
+        self.pct = 0
+        self.frame = _draw_chamfer(c, x, y, x + w, y + DRIVE_H, 4,
+                                   fill=BG_PANEL, outline=CYAN, width=1)
+        self.lbl_id = c.create_text(x + 6, y + 4, text=f"{name} DRIVE",
+                                    font=FONT_SMALL, fill=CYAN, anchor="nw")
+        self.val_id = c.create_text(x + w - 6, y + 4, text="", font=FONT_VALUE,
+                                   fill=GREEN, anchor="ne")
+        self.fill_id = c.create_rectangle(
+            x + 6, y + 18, x + 7, y + DRIVE_H - 5, fill=GREEN, outline="")
+
+    def set_hot(self, hot):
+        outline = ORANGE if hot else CYAN
+        for fid in self.frame:
+            self.c.itemconfig(fid, outline=outline)
+
+    def update(self, pct):
+        self.pct = pct
+        clr = metric_color(pct)
+        self.c.itemconfig(self.val_id, text=f"{pct:.0f}%", fill=clr)
+        fill = max(2, int((self.w - 12) * pct / 100))
+        self.c.itemconfig(self.fill_id, fill=clr)
+        self.c.coords(self.fill_id,
+                      self.x + 6, self.y + 18,
+                      self.x + 6 + fill, self.y + DRIVE_H - 5)
+
+    @property
+    def bottom(self):
+        return self.y + DRIVE_H
 
 class MonitorApp:
     def __init__(self):
@@ -250,7 +344,7 @@ class MonitorApp:
         self.root.update_idletasks()
 
         self.canvas = tk.Canvas(self.root, bg=BG, highlightthickness=0,
-                                width=WIDTH, height=300)
+                                width=WIDTH, height=400)
         self.canvas.pack()
 
         # hwnd — получаем сразу, пока заголовок ещё есть
@@ -294,11 +388,12 @@ class MonitorApp:
     def _show_move_chrome(self):
         self._hide_move_chrome()
         h = self.canvas.winfo_height()
-        self._move_border = self.canvas.create_rectangle(
-            2, 2, WIDTH - 2, h - 2, outline=ACCENT, width=2)
+        self._move_border = self.canvas.create_polygon(
+            _chamfer_points(2, 2, WIDTH - 2, h - 2, CHAMFER),
+            fill="", outline=CYAN, width=2)
         self._move_hint = self.canvas.create_text(
-            WIDTH // 2, h - PAD, text="перетащите", anchor="s",
-            font=FONT_SMALL, fill=ACCENT)
+            WIDTH // 2, h - PAD, text="DRAG TO MOVE", anchor="s",
+            font=FONT_SMALL, fill=CYAN)
         self.canvas.tag_raise(self._move_border)
         self.canvas.tag_raise(self._move_hint)
 
@@ -437,75 +532,56 @@ class MonitorApp:
 
     # ---- построение макета (один раз) ----
     def _build_layout(self):
-        c  = self.canvas
-        x0 = PAD
-        y  = PAD
-        bw = WIDTH - PAD * 2
+        c = self.canvas
+        col_w = (WIDTH - PAD * 2 - COL_GAP) // 2
+        lx = PAD
+        rx = PAD + col_w + COL_GAP
+        y = PAD + 4
 
-        c.create_text(x0, y, text="PC Monitor", anchor="nw", font=FONT_TITLE, fill=FG)
-        c.create_oval(WIDTH - PAD - 7, y + 5, WIDTH - PAD, y + 12,
-                      fill=ACCENT_OK, outline="")
-        y += 24
-        c.create_line(x0, y, x0 + bw, y, fill=BORDER)
-        y += 12
+        _glow_text(c, WIDTH // 2, y, "SYSTEM MONITORING", FONT_TITLE, WHITE, "n")
+        y += 28
 
-        def sec(title):
-            nonlocal y
-            c.create_text(x0, y, text=title.upper(), anchor="nw",
-                          font=FONT_SEC, fill=MUTED)
-            y += 16
+        ly = y
+        self._r_cpu = HudMetric(c, lx, ly, col_w, "CPU USAGE")
+        ly = self._r_cpu.bottom + 10
+        self._r_ram = HudMetric(c, lx, ly, col_w, "RAM USAGE")
+        ly = self._r_ram.bottom + 10
+        self._r_vram = HudMetric(c, lx, ly, col_w, "VRAM USAGE")
+        ly = self._r_vram.bottom + 16
+        _glow_text(c, lx, ly, "TEMPERATURE", FONT_TLBL, CYAN, "nw")
+        ly += 18
+        self._txt_temp = _glow_text(c, lx + col_w // 2, ly + 20, "—°C",
+                                      FONT_TEMP, GREEN, "center")
 
-        def row(label):
-            nonlocal y
-            r = Row(c, x0, y, bw, label)
-            y = r.bottom + 10
-            return r
+        ry = y
+        _glow_text(c, rx, ry, "GPU LOAD", FONT_LABEL, CYAN, "nw")
+        self._gpu_val = _glow_text(c, rx + col_w, ry, "", FONT_VALUE, GREEN, "ne")
+        ry += 15
+        self._gpu_bar = SegmentedBar(c, rx, ry, col_w)
+        ry = self._gpu_bar.bottom + 12
 
-        sec("Процессор")
-        self._r_cpu = row("Нагрузка")
-
-        with self._lock:
-            ncores = max(len(self._cores), psutil.cpu_count())
-        ncols = min(ncores, 16)
-        gap = 3
-        cw = max(2, (bw - (ncols - 1) * gap) // ncols)
-        self._core_bars = []
-        for i in range(ncols):
-            cx = x0 + i * (cw + gap)
-            c.create_rectangle(cx, y, cx + cw, y + CORE_H, fill=BAR_BG, outline="")
-            fid = c.create_rectangle(cx, y + CORE_H - 2, cx + cw, y + CORE_H,
-                                     fill=ACCENT_OK, outline="")
-            self._core_bars.append((fid, CORE_H, cx, y, cw))
-        y += CORE_H + 12
-
-        sec("Память")
-        self._r_ram = row("RAM")
-
-        self._gpu_y_start = y
-        sec("Видеокарта")
-        self._r_gpu_load = row("Нагрузка")
-        self._r_gpu_vram = row("VRAM")
-        self._txt_gpu_temp = c.create_text(x0, y, text="", anchor="nw",
-                                           font=FONT_SMALL, fill=ACCENT_OK)
-        self._gpu_temp_y = y
-        y += 14
-        self._gpu_y_end = y
-
-        sec("Сеть")
-        self._txt_net_up = c.create_text(
-            x0, y, text="↑ 0.00 МБ/с", anchor="nw", font=FONT_LBL, fill=NET_UP)
-        self._txt_net_down = c.create_text(
-            x0 + bw, y, text="↓ 0.00 МБ/с", anchor="ne", font=FONT_LBL, fill=NET_DOWN)
-        y += 18
-
-        sec("Диски")
         self._disk_rows = {}
         with self._lock:
             drives = sorted(self._disk.keys())
         for drv in drives[:4]:
-            self._disk_rows[drv] = row(drv)
+            name = drv.rstrip(":").upper()
+            row = DriveRow(c, rx, ry, col_w, name)
+            self._disk_rows[drv] = row
+            ry = row.bottom + 6
 
-        total_h = y + PAD
+        net_y = max(ly + 56, ry) + 8
+        net_h = 34
+        _draw_chamfer(c, PAD, net_y, WIDTH - PAD, net_y + net_h, 6,
+                      fill=BG_PANEL, outline=CYAN, width=1, glow=True)
+        _glow_text(c, PAD + 10, net_y + 8, "NETWORK:", FONT_NET, CYAN, "nw")
+        self._txt_net_up = c.create_text(
+            PAD + 100, net_y + 8, text="↑ UP 0.00 MB/s",
+            anchor="nw", font=FONT_NET, fill=GREEN)
+        self._txt_net_down = c.create_text(
+            PAD + 250, net_y + 8, text="↓ DOWN 0.00 MB/s",
+            anchor="nw", font=FONT_NET, fill=GREEN)
+
+        total_h = net_y + net_h + PAD
         self.canvas.config(height=total_h)
         _draw_shell(c, WIDTH, total_h)
 
@@ -516,6 +592,7 @@ class MonitorApp:
             mx, my, mw, mh = get_primary_monitor()
             wx = mx + (mw - WIDTH) // 2
             wy = my + (mh - total_h) // 2
+        wx, wy = clamp_window_pos(wx, wy, WIDTH, total_h)
         self.root.geometry(f"{WIDTH}x{total_h}+{wx}+{wy}")
         self._layout_ready = True
         self._save_position()
@@ -532,7 +609,6 @@ class MonitorApp:
 
         with self._lock:
             cpu   = self._cpu_pct
-            cores = list(self._cores)
             ram   = self._ram
             net   = self._net
             gpu   = self._gpu
@@ -540,35 +616,42 @@ class MonitorApp:
 
         self._r_cpu.update(f"{cpu:.0f}%", cpu)
 
-        for i, (fid, bh, cx, cy, cw) in enumerate(self._core_bars):
-            cp = cores[i] if i < len(cores) else 0
-            fh = max(2, int(bh * cp / 100))
-            c.coords(fid, cx, cy + bh - fh, cx + cw, cy + bh)
-            c.itemconfig(fid, fill=bar_color(cp))
-
         used, total, pct = ram
-        self._r_ram.update(f"{used:.1f} / {total:.0f} ГБ", pct)
+        self._r_ram.update(f"{used:.1f} / {total:.0f} GB", pct)
 
         if gpu:
             g_pct, g_mem, g_temp = gpu
-            self._r_gpu_load.update(f"{g_pct:.0f}%", g_pct)
-            self._r_gpu_vram.update(f"{g_mem:.0f}%", g_mem)
-            t_clr = ACCENT_OK if g_temp < 75 else (ACCENT_WARN if g_temp < 90 else ACCENT_HOT)
-            c.itemconfig(self._txt_gpu_temp,
-                         text=f"Темп: {g_temp:.0f}°C", fill=t_clr)
+            self._gpu_bar.update(g_pct)
+            c.itemconfig(self._gpu_val, text=f"{g_pct:.0f}%", fill=metric_color(g_pct))
+            self._r_vram.update(f"{g_mem:.0f}%", g_mem)
+            temp = g_temp
         else:
-            self._r_gpu_load.update("—", 0)
-            self._r_gpu_vram.update("—", 0)
-            c.itemconfig(self._txt_gpu_temp, text="")
+            self._gpu_bar.update(0)
+            c.itemconfig(self._gpu_val, text="—", fill=GREEN)
+            self._r_vram.update("—", 0)
+            temp = get_cpu_temp()
+
+        if temp is not None:
+            t_clr = metric_color(min(temp, 100))
+            c.itemconfig(self._txt_temp, text=f"{temp:.0f}°C", fill=t_clr)
+        else:
+            c.itemconfig(self._txt_temp, text="—°C", fill=GREEN)
 
         s, r = net
-        c.itemconfig(self._txt_net_up,   text=f"↑ {s:.2f} МБ/с")
-        c.itemconfig(self._txt_net_down,  text=f"↓ {r:.2f} МБ/с")
+        c.itemconfig(self._txt_net_up, text=f"↑ UP {s:.2f} MB/s")
+        c.itemconfig(self._txt_net_down, text=f"↓ DOWN {r:.2f} MB/s")
 
+        hot_drv = None
+        hot_pct = -1
         for drv, row in self._disk_rows.items():
             if drv in disk:
-                used, total, pct = disk[drv]
-                row.update(f"{used:.0f}/{total:.0f}ГБ", pct)
+                pct = disk[drv][2]
+                row.update(pct)
+                if pct > hot_pct:
+                    hot_pct = pct
+                    hot_drv = drv
+        for drv, row in self._disk_rows.items():
+            row.set_hot(drv == hot_drv and hot_pct >= 70)
 
         self._ensure_topmost()
         self.root.after(UPDATE_MS, self._update)
